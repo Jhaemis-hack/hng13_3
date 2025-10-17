@@ -1,4 +1,3 @@
-# app/core/exceptions.py
 from fastapi import status
 
 class AppException(Exception):

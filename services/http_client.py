@@ -1,4 +1,3 @@
-# app/services/http_client.py
 import httpx
 from httpx import Timeout, Limits
 from core.exceptions import ExternalServiceException
