@@ -2,3 +2,4 @@ fastapi[standard]
 slowapi
 pydantic_settings
 httpx[h2]
+uvicorn
