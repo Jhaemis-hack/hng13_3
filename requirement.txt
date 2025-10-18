@@ -1,4 +1,3 @@
-fastapi[standard]
 fastapi
 slowapi
 pydantic_settings
