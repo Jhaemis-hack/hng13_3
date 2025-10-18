@@ -1,10 +1,10 @@
-# 🚀 My Profile API
+# My Profile API
 
 A **FastAPI-based web application** that serves my profile details, health checks, and an external cat fact using rate limiting and proper exception handling. It demonstrates clean API structure, modular configuration, and integration with external services.
 
 ---
 
-## 📂 Project Overview
+## Project Overview
 
 This API provides the following routes:
 
@@ -16,7 +16,7 @@ This API provides the following routes:
 
 ---
 
-## 🧰 Features
+## Features
 
 - **FastAPI** for modern async web framework performance.
 - **SlowAPI** for rate limiting.
@@ -27,7 +27,7 @@ This API provides the following routes:
 
 ---
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```
 hng13_1/
@@ -50,16 +50,16 @@ hng13_1/
 
 ---
 
-## ⚙️ Installation Guide
+## Installation Guide
 
-### 1️⃣ Clone the Repository
+### Clone the Repository
 
 ```bash
 git clone https://github.com/yourusername/hng13_1.git
 cd hng13_1
 ```
 
-### 2️⃣ Create a Virtual Environment
+### Create a Virtual Environment
 
 ```bash
 python -m venv .ve
@@ -77,7 +77,7 @@ Activate it:
 source .ve/bin/activate
 ```
 
-### 3️⃣ Install Dependencies
+### Install Dependencies
 
 ```bash
 pip install --upgrade pip
@@ -96,7 +96,7 @@ httpx[h2]
 
 ---
 
-## 🚦 Running the Application Locally
+## Running the Application Locally
 
 Once installed, run the app using:
 
@@ -109,7 +109,7 @@ The server starts at:
 
 ---
 
-## ✅ API Endpoints Overview
+## API Endpoints Overview
 
 | Endpoint | Description | Example |
 |-----------|--------------|----------|
@@ -119,7 +119,7 @@ The server starts at:
 
 ---
 
-## 🌐 Example Response
+## Example Response
 
 **GET `/me`**
 
@@ -138,7 +138,7 @@ The server starts at:
 
 ---
 
-## 🧱 Deployment Notes
+## Deployment Notes
 
 If deploying (e.g. Render, Railway, etc.), ensure your **Start Command** is:
 
@@ -150,7 +150,7 @@ And **Python version** is `>=3.12`.
 
 ---
 
-## 👨‍💻 Author
+## Author
 
 **James Kehinde**  
 Email: gbemilekekenny@gmail.com  
@@ -158,6 +158,6 @@ Stack: NodeJS / Full Stack Developer
 
 ---
 
-## 🪪 License
+## License
 
 This project is licensed under the MIT License.
