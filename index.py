@@ -23,6 +23,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -68,7 +69,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # db = CountryDB(
 #     countries=[],
 #     last_refreshed_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -80,7 +80,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
 
 db_instance = CountryDBInstance(
     last_refreshed_at=datetime.now(timezone.utc)
@@ -145,47 +144,44 @@ async def health_check():
 
 @limiter.limit("8/minutes")
 @app.get("/countries")
-async def get_all_countries(
-    request: Request,
-    db: Session = Depends(get_db),
-    currency: Optional[str] = Query(None, description="sort by currency"),
-    sort: Optional[str] = Query(None, description="sort by GDP"),
-    region: Optional[str] = Query(None, description="search for countries in a specific region"),
-):
-    query = db.query(Country)
+async def get_all_countries(request: Request, currency: Optional[str] = Query(None, description="sort by currency"),
+                            sort: Optional[str] = Query(None, description="sort by gdp"),
+                            region: Optional[str] = Query(None,
+                                                          description="search for countries in a specific region"), ):
+    curr = currency.lower() if currency else ""
+    sort = sort.lower() if sort else ""
+    region = region.lower() if region else ""
 
-    if currency:
-        query = query.filter(Country.currency_code.ilike(f"%{currency}%"))
-    if region:
-        query = query.filter(Country.region.ilike(f"%{region}%"))
+    countries = []
 
-    countries = query.all()
-    if not countries:
+    for country in db.countries:
+        if curr and region:
+            if country.get('currency_code') and country.get('currency_code').lower() == curr:
+                if country.get('region') and country.get('region').lower() == region:
+                    countries.append(country)
+        elif curr and not region:
+            if country.get('currency_code') and country.get('currency_code').lower() == curr:
+                countries.append(country)
+        elif curr == "" and region:
+            if country.get('region') and country.get('region').lower() == region:
+                countries.append(country)
+        else:
+            countries.append(country)
+
+    sorted_countries = []
+    if countries:
+        if sort and sort == "gbd_desc":
+            countries = sorted(countries, key=lambda country: country.estimated_gdp or 0, reverse=True)
+            sorted_countries.append(countries)
+        elif sort and sort == "gdb_incr":
+            countries = sorted(countries, key=lambda country: country.estimated_gdp or 0, reverse=False)
+            sorted_countries.append(countries)
+        else:
+            sorted_countries = countries
+    else:
         raise NotFoundException("Country not found")
 
-    # Sorting
-    if sort == "gbd_desc":
-        countries = sorted(countries, key=lambda c: c.estimated_gdp or 0, reverse=True)
-    elif sort == "gdb_incr":
-        countries = sorted(countries, key=lambda c: c.estimated_gdp or 0, reverse=False)
-
-    result = [
-        {
-            "id": c.id,
-            "name": c.name,
-            "capital": c.capital,
-            "region": c.region,
-            "population": c.population,
-            "currency_code": c.currency_code,
-            "exchange_rate": c.exchange_rate,
-            "estimated_gdp": c.estimated_gdp,
-            "flag_url": c.flag_url,
-            "last_refreshed_at": c.last_refreshed_at.isoformat()
-        }
-        for c in countries
-    ]
-    return JSONResponse(content=result, status_code=200, media_type="application/json")
-
+    return JSONResponse(content=sorted_countries, status_code=200, media_type="application/json")
 
 
 @limiter.limit("8/minute")
@@ -206,13 +202,11 @@ async def fetch_countries(request: Request, db: Session = Depends(get_db)):
     if not response:
         raise ExternalServiceUnavailable("timeout, try again later.")
 
-    # Create a new snapshot
     db_instance = CountryDBInstance(last_refreshed_at=datetime.now(timezone.utc))
     db.add(db_instance)
     db.commit()
     db.refresh(db_instance)
 
-    # Store countries
     for item in response:
         country = Country(
             name=item["name"],
@@ -230,79 +224,61 @@ async def fetch_countries(request: Request, db: Session = Depends(get_db)):
 
     db.commit()
 
-    # For image generation
-    summary_data = {
-        "countries": [item for item in response],
-        "last_refreshed_at": db_instance.last_refreshed_at.isoformat()
-    }
-    await create_image(CountryDB(**summary_data))
+    db.countries = response
+    await create_image(db)
 
     return JSONResponse(content=response, status_code=201, media_type="application/json")
 
 
-
 @limiter.limit("8/minute")
 @app.get("/countries/{country_name}")
-async def get_country(request: Request, country_name: str, db: Session = Depends(get_db)):
+async def get_country(request: Request, country_name: str):
     if not country_name:
         raise BadRequestException("Country name can't be empty.")
 
-    country = db.query(Country).filter(Country.name.ilike(country_name)).first()
+    name = country_name.lower() if country_name else ""
+    fetched_country = []
 
-    if not country:
+    if name:
+        for I in db.countries:
+            if I.get('name').lower() == name:
+                fetched_country.append(I)
+
+    if not fetched_country:
         raise NotFoundException("Country not found")
 
-    return JSONResponse(content={
-        "id": country.id,
-        "name": country.name,
-        "capital": country.capital,
-        "region": country.region,
-        "population": country.population,
-        "currency_code": country.currency_code,
-        "exchange_rate": country.exchange_rate,
-        "estimated_gdp": country.estimated_gdp,
-        "flag_url": country.flag_url,
-        "last_refreshed_at": country.last_refreshed_at.isoformat()
-    }, status_code=200, media_type="application/json")
+    return JSONResponse(content=fetched_country[0], status_code=200, media_type="application/json")
 
 
 @limiter.limit("8/minute")
 @app.delete("/countries/{country_name}")
-async def remove_country(request: Request, country_name: str, db: Session = Depends(get_db)):
+async def remove_country(request: Request, country_name: str):
     if not country_name:
         raise BadRequestException("Country name can't be empty.")
 
-    country = db.query(Country).filter(Country.name.ilike(country_name)).first()
+    name = country_name.lower() if country_name else ""
 
-    if not country:
-        raise NotFoundException("Country not found")
+    if name:
+        for I in db.countries:
+            if I.get('name').lower() == name:
+                db.countries.remove(I)
+                return JSONResponse(content={}, status_code=200, media_type="application/json")
 
-    db.delete(country)
-    db.commit()
-
-    return JSONResponse(content={"message": f"{country_name} removed successfully"}, status_code=200)
-
+    raise NotFoundException("Country not found")
 
 
 @limiter.limit("8/minute")
 @app.get("/status")
-async def get_status(request: Request, db: Session = Depends(get_db)):
-    count = db.query(Country).count()
+async def get_status(request: Request):
+    countries_count = len(db.countries)
 
-    if count == 0:
+    if not countries_count:
         raise NotFoundException("No countries exist in db.")
 
-    last_refresh = (
-        db.query(CountryDBInstance)
-        .order_by(CountryDBInstance.last_refreshed_at.desc())
-        .first()
-    )
-
     return JSONResponse(content={
-        "total_countries": count,
-        "last_refreshed_at": last_refresh.last_refreshed_at.isoformat() if last_refresh else None
+        "total_countries": countries_count,
+        "last_refreshed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     }, status_code=200, media_type="application/json")
-
 
 
 @app.get("/favicon.ico", include_in_schema=False)
