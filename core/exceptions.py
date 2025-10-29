@@ -26,3 +26,7 @@ class BadRequestException(AppException):
 class ExternalServiceException(AppException):
     def __init__(self, message: str = "External service error"):
         super().__init__(message, status.HTTP_502_BAD_GATEWAY)
+
+class ExternalServiceUnavailable(AppException):
+    def __init__(self, message: str = "External data source unavailable"):
+        super().__init__(message, status.HTTP_503_SERVICE_UNAVAILABLE)

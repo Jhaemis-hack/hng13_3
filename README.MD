@@ -1,163 +1,171 @@
-# My Profile API
 
-A **FastAPI-based web application** that serves my profile details, health checks, and an external cat fact using rate limiting and proper exception handling. It demonstrates clean API structure, modular configuration, and integration with external services.
+# Country Data & GDP Summary Service
 
----
+## Overview
 
-## Project Overview
+This project is a **FastAPI-based service** designed to fetch, store, and visualize global country data — including GDP, population, and currency exchange rates.  
+It connects to external APIs, persists records in a local database via SQLAlchemy, and generates image summaries of key economic data.
 
-This API provides the following routes:
-
-| Endpoint | Method | Description |
-|-----------|--------|--------------|
-| `/` | GET | Welcome route |
-| `/health` | GET | Health check endpoint |
-| `/me` | GET | Returns profile details and a random cat fact |
+The app supports data refresh operations, country-specific queries, and automatic image generation of top-performing countries by GDP.
 
 ---
 
-## Features
+##  Core Features
 
-- **FastAPI** for modern async web framework performance.
-- **SlowAPI** for rate limiting.
-- **CORS middleware** for cross-origin requests.
-- **Config management** using Pydantic settings.
-- **Custom error handling** through reusable error handler modules.
-- **Asynchronous HTTP client integration.**
+Fetches and aggregates live data on countries, population, and currencies.
+`/countries/refresh` endpoint updates or adds new countries intelligently (no duplication).
+Uses SQLite (or any SQLAlchemy-compatible DB) for persistence.
+Generates visual summary images (top 5 GDP countries, etc.).
+Tracks last refresh time.
+Asynchronous implementation for non-blocking I/O operations.
+-  Integrated rate limiting to prevent abuse.
+Fully typed Python 3.10+ code with Pydantic models.
 
 ---
 
 ## Project Structure
 
 ```
-hng13_1/
-│
-├── core/
-│   ├── __init__.py
-│   ├── config.py
-│   ├── error_handlers.py
-│   ├── exceptions.py
-│
-├── services/
-│   ├── __init__.py
-│   ├── http_client.py
-│
+hng13_3/
 ├── main.py
-├── test_main.py
+├── database.py
+├── models.py
+├── schemas.py
+├── utils/
+│   ├── api_client.py
+│   ├── image_utils.py
+│   └── helpers.py
 ├── requirements.txt
 └── README.md
 ```
 
 ---
 
-## Installation Guide
+## Tech Stack
 
-### Clone the Repository
-
-```bash
-git clone https://github.com/yourusername/hng13_1.git
-cd hng13_1
-```
-
-### Create a Virtual Environment
-
-```bash
-python -m venv .ve
-```
-
-Activate it:
-
-**Windows**
-```bash
-.ve\Scripts\activate
-```
-
-**Mac/Linux**
-```bash
-source .ve/bin/activate
-```
-
-### Install Dependencies
-
-```bash
-pip install --upgrade pip
-pip install -r requirements.txt
-```
-
-Ensure your `requirements.txt` includes:
-
-```
-fastapi
-uvicorn[standard]
-slowapi
-pydantic_settings
-httpx[h2]
-```
+| Component | Technology |
+|------------|-------------|
+| **Backend** | FastAPI |
+| **Database** | SQLAlchemy ORM + SQLite |
+| **HTTP Client** | `httpx` (async) |
+| **Data Models** | Pydantic |
+| **Visualization** | Pillow / Matplotlib |
+| **Rate Limiting** | slowapi |
+| **Runtime** | Python 3.10+ |
 
 ---
 
-## Running the Application Locally
+## Installation
 
-Once installed, run the app using:
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/yourusername/hng13_3.git
+   cd hng13_3
+   ```
+
+2. **Set up a virtual environment**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate      # macOS/Linux
+   venv\Scripts\activate       # Windows
+   ```
+
+3. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Configure environment variables**
+
+   Create a `.env` file:
+   ```env
+   DATABASE_URL=sqlite:///./countries.db
+   EXTERNAL_API_KEY=your_api_key_here
+   DEBUG=True
+   ```
+
+5. **Initialize the database**
+   ```bash
+   python
+   >>> from database import Base, engine
+   >>> Base.metadata.create_all(bind=engine)
+   >>> exit()
+   ```
+
+---
+
+## Running the Application
 
 ```bash
 uvicorn main:app --reload
 ```
-
-The server starts at:
-👉 http://127.0.0.1:8000
+Docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
 
 ---
 
-## API Endpoints Overview
+## Key Endpoints
 
-| Endpoint | Description | Example |
-|-----------|--------------|----------|
-| `/` | Welcome message | GET `/` |
-| `/health` | Health status | GET `/health` |
-| `/me` | Profile + random cat fact | GET `/me` |
+### `POST /countries/refresh`
+Fetches and updates all country data.
 
----
+### `GET /countries`
+Lists all countries.
 
-## Example Response
+### `GET /countries/{name}`
+Returns details for a specific country.
 
-**GET `/me`**
-
-```json
-{
-  "status": "success",
-  "user": {
-    "email": "gbemilekekenny@gmail.com",
-    "name": "James Kehinde",
-    "stack": "NodeJs"
-  },
-  "timestamp": "2025-10-17T23:30:15Z",
-  "fact": "Cats sleep for around 13 to 16 hours a day."
-}
-```
+### `GET /summary/image`
+Returns generated GDP summary image.
 
 ---
 
-## Deployment Notes
+## Image Generation Logic
 
-If deploying (e.g. Render, Railway, etc.), ensure your **Start Command** is:
+Triggered automatically after each `/countries/refresh` call.  
+The generated image shows the top 5 countries by GDP.
+
+---
+
+## Rate Limiting
+
+`/countries/refresh` → 8 requests per minute.
+
+---
+
+## Testing
 
 ```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
+pytest --maxfail=1 --disable-warnings -q
 ```
-
-And **Python version** is `>=3.12`.
 
 ---
 
-## Author
+## Troubleshooting
 
-**James Kehinde**  
-Email: gbemilekekenny@gmail.com  
-Stack: NodeJS / Full Stack Developer
+| Problem | Possible Fix |
+|----------|---------------|
+| Database locked | Use single-threaded worker |
+| API timeout | Retry later |
+| Image not generated | Ensure Pillow installed |
+
+---
+
+## Contribution
+
+1. Fork the repo  
+2. Create a branch  
+3. Commit, push, and open a PR
 
 ---
 
 ## License
 
-This project is licensed under the MIT License.
+MIT License © 2025 — James Kehinde
+
+---
+
+## Contact
+
+- Author: **James Kehinde**
+- Email: contact@yourdomain.com
+- GitHub: [https://github.com/yourusername](https://github.com/yourusername)

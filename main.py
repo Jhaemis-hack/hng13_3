@@ -1,11 +1,8 @@
 import os
-from fastapi import FastAPI, Request, Response, Query, Depends
+from fastapi import FastAPI, Response, Query, Depends
 from fastapi.responses import FileResponse
-from datetime import datetime, timezone
-from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.exceptions import RequestValidationError
-from core.error_handlers import register_error_handlers, conditional_validation_handler
+from core.error_handlers import register_error_handlers
 from model.index import CountryDB, CountryDBInstance, Country
 from model.database import SessionLocal
 from services.country_data import fetch_all_countries
@@ -20,7 +17,12 @@ from contextlib import asynccontextmanager
 from typing import Optional
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
+from model.database import engine, Base
+from datetime import datetime, timezone
+from fastapi import Request
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+from fastapi.responses import JSONResponse
 
 
 @asynccontextmanager
@@ -37,13 +39,14 @@ limiter = Limiter(key_func=get_remote_address)
 
 app = FastAPI(lifespan=lifespan, title="My Profile App")
 register_error_handlers(app)
+# Create all database tables
+Base.metadata.create_all(bind=engine)
 
 # Register exception handlers
 app.add_exception_handler(RateLimitExceeded, lambda request, exc: JSONResponse(
     status_code=429,
     content={"success": False, "error": "Too many requests, please slow down."},
 ))
-app.add_exception_handler(RequestValidationError, conditional_validation_handler)
 
 
 @lru_cache
@@ -88,16 +91,14 @@ db_instance = CountryDBInstance(
 
 
 async def create_image(data):
-    # Ensure cache directory exists
     Path("cache").mkdir(exist_ok=True)
 
-    top_5 = sorted(data.countries, key=lambda c: c['estimated_gdp'] or 0, reverse=True)[:5]
+    # Now data.countries are ORM objects, not dicts
+    top_5 = sorted(data.countries, key=lambda c: c.estimated_gdp or 0, reverse=True)[:5]
 
-    # 🧠 Step 3: Create a summary image
     img = Image.new("RGB", (600, 300), color="white")
     draw = ImageDraw.Draw(img)
 
-    # You can customize font
     try:
         font = ImageFont.truetype("arial.ttf", 18)
     except:
@@ -108,22 +109,15 @@ async def create_image(data):
     y += 40
     draw.text((20, y), f"Total countries: {len(data.countries)}", fill="black", font=font)
     y += 30
-
     draw.text((20, y), "Top 5 by GDP:", fill="black", font=font)
     y += 30
+
     for country in top_5:
-        draw.text(
-            (40, y),
-            f"{country['name']}",
-            fill="black",
-            font=font,
-        )
+        draw.text((40, y), f"{country.name}", fill="black", font=font)
         y += 25
 
     y += 20
     draw.text((20, y), f"Last refreshed: {data.last_refreshed_at}", fill="black", font=font)
-
-    # Step 4: Save it
     img.save("cache/summary.png")
 
 
@@ -146,11 +140,11 @@ async def health_check():
 @limiter.limit("8/minutes")
 @app.get("/countries")
 async def get_all_countries(
-    request: Request,
-    db: Session = Depends(get_db),
-    currency: Optional[str] = Query(None, description="sort by currency"),
-    sort: Optional[str] = Query(None, description="sort by GDP"),
-    region: Optional[str] = Query(None, description="search for countries in a specific region"),
+        request: Request,
+        db: Session = Depends(get_db),
+        currency: Optional[str] = Query(None, description="sort by currency"),
+        sort: Optional[str] = Query(None, description="sort by GDP"),
+        region: Optional[str] = Query(None, description="search for countries in a specific region"),
 ):
     query = db.query(Country)
 
@@ -187,6 +181,40 @@ async def get_all_countries(
     return JSONResponse(content=result, status_code=200, media_type="application/json")
 
 
+@limiter.limit("8/minute")
+@app.delete("/countries/clear")
+async def clear_countries(request: Request):
+    """Completely clear all country data and reset cache."""
+    db: Session = SessionLocal()
+
+    try:
+        # Delete all countries
+        deleted_count = db.query(Country).delete()
+
+        # Reset the main DB instance timestamp
+        country_db = db.query(CountryDBInstance).first()
+        if country_db:
+            country_db.last_refreshed_at = datetime.now(timezone.utc)
+
+        db.commit()
+
+        # Remove summary image if it exists
+        image_path = os.path.join("cache", "summary.png")
+        if os.path.exists(image_path):
+            os.remove(image_path)
+
+        return JSONResponse(
+            content={
+                "status": "success",
+                "message": f"Database cleared successfully. {deleted_count} countries removed.",
+                "last_refreshed_at": country_db.last_refreshed_at.isoformat() if country_db else None,
+            },
+            status_code=200,
+        )
+
+    finally:
+        db.close()
+
 
 @limiter.limit("8/minute")
 @app.get("/countries/image")
@@ -199,46 +227,86 @@ async def get_image(request: Request):
 
 @limiter.limit("8/minute")
 @app.post("/countries/refresh")
-async def fetch_countries(request: Request, db: Session = Depends(get_db)):
+async def fetch_countries(request: Request):
+    """Fetch latest countries and update or insert them into the database."""
+
     countries_data = await fetch_all_countries(settings=get_settings())
     response = await extract_rate(data=countries_data, settings=get_settings())
 
     if not response:
         raise ExternalServiceUnavailable("timeout, try again later.")
 
-    # Create a new snapshot
-    db_instance = CountryDBInstance(last_refreshed_at=datetime.now(timezone.utc))
-    db.add(db_instance)
-    db.commit()
-    db.refresh(db_instance)
+    # Open database session
+    db: Session = SessionLocal()
 
-    # Store countries
-    for item in response:
-        country = Country(
-            name=item["name"],
-            capital=item.get("capital"),
-            region=item.get("region"),
-            population=item["population"],
-            currency_code=item.get("currency_code"),
-            exchange_rate=item.get("exchange_rate"),
-            estimated_gdp=item.get("estimated_gdp"),
-            flag_url=item.get("flag_url"),
-            last_refreshed_at=datetime.now(timezone.utc),
-            db_id=db_instance.id
+    try:
+        # Get or create main DB instance
+        country_db = db.query(CountryDBInstance).first()
+        if not country_db:
+            country_db = CountryDBInstance()
+            db.add(country_db)
+            db.commit()
+            db.refresh(country_db)
+
+        for item in response:
+            # Match by name (case-insensitive)
+            existing_country = (
+                db.query(Country)
+                .filter(func.lower(Country.name) == item["name"].lower())
+                .first()
+            )
+
+            # # Generate random multiplier and recompute estimated GDP
+            # multiplier = random.randint(1000, 2000)
+            # population = item.get("population", 0)
+            # exchange_rate = item.get("exchange_rate") or 1.0
+            # estimated_gdp = population * exchange_rate * multiplier
+
+            if existing_country:
+                existing_country.capital = item.get("capital")
+                existing_country.region = item.get("region")
+                existing_country.population = item.get("population")
+                existing_country.currency_code = item.get("currency_code")
+                existing_country.exchange_rate = item.get("exchange_rate")
+                existing_country.estimated_gdp = item.get("estimated_gdp")
+                existing_country.flag_url = item.get("flag_url")
+                existing_country.last_refreshed_at = datetime.now(timezone.utc)
+            else:
+                # INSERT new record
+                new_country = Country(
+                    name=item.get("name"),
+                    capital=item.get("capital"),
+                    region=item.get("region"),
+                    population=item.get("population"),
+                    currency_code=item.get("currency_code"),
+                    exchange_rate=item.get("exchange_rate"),
+                    estimated_gdp=item.get("estimated_gdp"),
+                    flag_url=item.get("flag_url"),
+                    last_refreshed_at=datetime.now(timezone.utc),
+                    db_id=country_db.id,
+                )
+                db.add(new_country)
+
+        # Update main database last refresh timestamp
+        country_db.last_refreshed_at = datetime.now(timezone.utc)
+        db.commit()
+
+        # Generate image summary
+        all_countries = db.query(Country).all()
+        summary_data = {
+            "countries": [c.__dict__ for c in all_countries],
+            "last_refreshed_at": country_db.last_refreshed_at.isoformat(),
+        }
+
+        await create_image(CountryDB(**summary_data))
+
+        return JSONResponse(
+            content=response,
+            status_code=201,
         )
-        db.add(country)
 
-    db.commit()
-
-    # For image generation
-    summary_data = {
-        "countries": [item for item in response],
-        "last_refreshed_at": db_instance.last_refreshed_at.isoformat()
-    }
-    await create_image(CountryDB(**summary_data))
-
-    return JSONResponse(content=response, status_code=201, media_type="application/json")
-
+    finally:
+        db.close()
 
 
 @limiter.limit("8/minute")
@@ -283,7 +351,6 @@ async def remove_country(request: Request, country_name: str, db: Session = Depe
     return JSONResponse(content={"message": f"{country_name} removed successfully"}, status_code=200)
 
 
-
 @limiter.limit("8/minute")
 @app.get("/status")
 async def get_status(request: Request, db: Session = Depends(get_db)):
@@ -302,7 +369,6 @@ async def get_status(request: Request, db: Session = Depends(get_db)):
         "total_countries": count,
         "last_refreshed_at": last_refresh.last_refreshed_at.isoformat() if last_refresh else None
     }, status_code=200, media_type="application/json")
-
 
 
 @app.get("/favicon.ico", include_in_schema=False)

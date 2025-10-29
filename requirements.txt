@@ -3,3 +3,9 @@ slowapi
 pydantic_settings
 httpx[http2]
 uvicorn[standard]
+pillow
+python-dotenv
+sqlalchemy
+pymysql
+pydantic
+python-dotenv

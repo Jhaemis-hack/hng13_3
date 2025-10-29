@@ -5,6 +5,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from .exceptions import AppException
 
 
+
 def register_error_handlers(app: FastAPI):
 
     @app.exception_handler(AppException)
@@ -12,7 +13,6 @@ def register_error_handlers(app: FastAPI):
         return JSONResponse(
             status_code=exc.status_code,
             content={
-                "success": False,
                 "error": exc.message,
             },
         )
@@ -22,7 +22,6 @@ def register_error_handlers(app: FastAPI):
         return JSONResponse(
             status_code=422,
             content={
-                "success": False,
                 "error": "Validation failed",
                 "details": exc.errors(),
             },
@@ -33,8 +32,7 @@ def register_error_handlers(app: FastAPI):
         return JSONResponse(
             status_code=exc.status_code,
             content={
-                "success": False,
-                "error": exc.detail,
+                "details": exc.detail,
             },
         )
 
@@ -44,7 +42,6 @@ def register_error_handlers(app: FastAPI):
         return JSONResponse(
             status_code=500,
             content={
-                "success": False,
                 "error": "Internal server error",
             },
         )
